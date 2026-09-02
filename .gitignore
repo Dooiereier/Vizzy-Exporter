@@ -1,0 +1,45 @@
+# Unity generated folders
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]serSettings/
+[Mm]emoryCaptures/
+
+# Unity generated project files
+.vs/
+.gradle/
+ExportedObj/
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+*.apk
+*.aab
+*.unitypackage
+*.app
+crashlytics-build.properties
+
+# Third-party plugin DLLs that must be supplied locally (see README) -
+# these come from the game's own Mod Tools package / your existing mod
+# project and are NOT redistributed in this repo.
+Assets/Scripts/0Harmony.dll
+Assets/Scripts/0Harmony.dll.meta
+Assets/Plugins/**/*.dll
+Assets/Plugins/**/*.dll.meta
+
+# OS cruft
+.DS_Store
+Thumbs.db

@@ -1,0 +1,8 @@
+{
+    "name": "Vizzy Copy Paste",
+    "references": [
+        "UnityEngine.UI",
+        "Unity.TextMeshPro",
+        "Unity.Mathematics"
+    ]
+}
