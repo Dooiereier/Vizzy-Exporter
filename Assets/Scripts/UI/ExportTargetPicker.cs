@@ -16,11 +16,13 @@ namespace Assets.Scripts.CopyPaste.UI
     public class ExportTargetPicker : MonoBehaviour
     {
         private const int MaxListedFiles = 40;
+        private const float MaxListHeight = 320f;
 
         private static ExportTargetPicker _instance;
 
         private RectTransform _panel;
         private Transform _listParent;
+        private ScrollRect _scrollRect;
         private VizzyExportSnippet _snippet;
 
         public static void Show(VizzyExportSnippet snippet, Vector2 screenPosition)
@@ -88,14 +90,49 @@ namespace Assets.Scripts.CopyPaste.UI
             header.color = new Color(1, 1, 1, 0.85f);
             header.alignment = TextAnchor.MiddleLeft;
 
-            GameObject listGo = new GameObject("List", typeof(RectTransform), typeof(VerticalLayoutGroup));
-            listGo.transform.SetParent(panelGo.transform, false);
+            // Scrollable list area: a fixed-height ScrollRect so a long programs folder
+            // scrolls instead of pushing the popup off-screen. The list itself keeps the
+            // same VerticalLayoutGroup + ContentSizeFitter as before, just now inside a
+            // masked viewport instead of laid out directly in the panel.
+            GameObject scrollGo = new GameObject("ScrollView", typeof(RectTransform), typeof(ScrollRect), typeof(LayoutElement));
+            scrollGo.transform.SetParent(panelGo.transform, false);
+            LayoutElement scrollLayoutElement = scrollGo.GetComponent<LayoutElement>();
+            scrollLayoutElement.preferredHeight = MaxListHeight;
+            scrollLayoutElement.flexibleHeight = 0;
+
+            GameObject viewportGo = new GameObject("Viewport", typeof(RectTransform), typeof(RectMask2D));
+            viewportGo.transform.SetParent(scrollGo.transform, false);
+            RectTransform viewportRect = viewportGo.GetComponent<RectTransform>();
+            viewportRect.anchorMin = Vector2.zero;
+            viewportRect.anchorMax = Vector2.one;
+            viewportRect.offsetMin = Vector2.zero;
+            viewportRect.offsetMax = Vector2.zero;
+
+            GameObject listGo = new GameObject("List", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
+            listGo.transform.SetParent(viewportGo.transform, false);
+            RectTransform listRect = listGo.GetComponent<RectTransform>();
+            listRect.anchorMin = new Vector2(0f, 1f);
+            listRect.anchorMax = new Vector2(1f, 1f);
+            listRect.pivot = new Vector2(0.5f, 1f);
+            listRect.anchoredPosition = Vector2.zero;
+            listRect.sizeDelta = new Vector2(0f, 0f);
+
             VerticalLayoutGroup listLayout = listGo.GetComponent<VerticalLayoutGroup>();
             listLayout.spacing = 1;
             listLayout.childControlWidth = true;
             listLayout.childControlHeight = true;
             listLayout.childForceExpandHeight = false;
             listLayout.childForceExpandWidth = true;
+            listGo.GetComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            _scrollRect = scrollGo.GetComponent<ScrollRect>();
+            _scrollRect.content = listRect;
+            _scrollRect.viewport = viewportRect;
+            _scrollRect.horizontal = false;
+            _scrollRect.vertical = true;
+            _scrollRect.movementType = ScrollRect.MovementType.Clamped;
+            _scrollRect.scrollSensitivity = 24f;
+
             _listParent = listGo.transform;
         }
 
@@ -134,6 +171,11 @@ namespace Assets.Scripts.CopyPaste.UI
             }
 
             gameObject.SetActive(true);
+
+            // Force the layout to settle before snapping scroll to the top, otherwise
+            // verticalNormalizedPosition reads against last frame's (stale/zero) content size.
+            Canvas.ForceUpdateCanvases();
+            _scrollRect.verticalNormalizedPosition = 1f;
         }
 
         private void OnFileChosen(string targetFilePath)
@@ -141,16 +183,19 @@ namespace Assets.Scripts.CopyPaste.UI
             VizzyExportSnippet snippet = _snippet;
             Hide();
 
-            if (VizzyProgramFileExporter.TryExport(snippet, targetFilePath, out int variablesCreated, out string error))
+            if (VizzyProgramFileExporter.TryExport(snippet, targetFilePath, out ExportCounts counts, out string error))
             {
-                string variableNote = "";
-                if (variablesCreated == 1)
-                    variableNote = " Created 1 missing global variable it needed.";
-                else if (variablesCreated > 1)
-                    variableNote = $" Created {variablesCreated} missing global variables it needed.";
+                List<string> createdNotes = new List<string>();
+                AppendCountNote(createdNotes, counts.VariablesCreated, "global variable", "global variables");
+                AppendCountNote(createdNotes, counts.CustomExpressionsCreated, "custom expression", "custom expressions");
+                AppendCountNote(createdNotes, counts.CustomInstructionsCreated, "custom instruction", "custom instructions");
+
+                string createdNote = createdNotes.Count > 0
+                    ? $" Created {string.Join(" and ", createdNotes)} it needed."
+                    : "";
 
                 PopupWidgets.ShowMessage($"Exported to {Path.GetFileNameWithoutExtension(targetFilePath)}." +
-                                          variableNote +
+                                          createdNote +
                                           " It'll show up as a new block group next time that program is opened.");
             }
             else
@@ -163,6 +208,14 @@ namespace Assets.Scripts.CopyPaste.UI
         {
             gameObject.SetActive(false);
             _snippet = null;
+        }
+
+        private static void AppendCountNote(List<string> notes, int count, string singular, string plural)
+        {
+            if (count == 1)
+                notes.Add($"1 {singular}");
+            else if (count > 1)
+                notes.Add($"{count} {plural}");
         }
     }
 }

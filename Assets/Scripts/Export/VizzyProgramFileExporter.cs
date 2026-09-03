@@ -8,6 +8,14 @@ using UnityEngine;
 
 namespace Assets.Scripts.CopyPaste.Export
 {
+    /// <summary>How many of each dependency kind TryExport actually created in the target file.</summary>
+    public struct ExportCounts
+    {
+        public int VariablesCreated;
+        public int CustomExpressionsCreated;
+        public int CustomInstructionsCreated;
+    }
+
     /// <summary>
     /// Lists existing Vizzy program files and writes a captured snippet into one of them.
     /// This never touches the running game's in-memory state - it edits the target .xml
@@ -68,13 +76,14 @@ namespace Assets.Scripts.CopyPaste.Export
         /// (a whole new column for instructions; a new flat entry in the shared Expressions
         /// container for a lone expression), positions it near the middle of the target's
         /// existing content so it lands somewhere visible instead of off in a stale
-        /// coordinate copied from the source program, creates any global variables it
-        /// references that the target doesn't already have, and saves the file.
+        /// coordinate copied from the source program, creates any global variables and
+        /// custom expressions/instructions it references (transitively) that the target
+        /// doesn't already have, and saves the file.
         /// </summary>
-        public static bool TryExport(VizzyExportSnippet snippet, string targetFilePath, out int variablesCreated, out string error)
+        public static bool TryExport(VizzyExportSnippet snippet, string targetFilePath, out ExportCounts counts, out string error)
         {
             error = null;
-            variablesCreated = 0;
+            counts = default;
 
             if (snippet == null || snippet.Nodes.Count == 0)
             {
@@ -107,8 +116,8 @@ namespace Assets.Scripts.CopyPaste.Export
                     StripIds(node); // avoid colliding with node ids already used in the target file
                 }
 
-                (int centerX, int centerY) = ComputeCenterPosition(root);
-                SetPosition(copiedNodes[0], centerX, centerY);
+                (int homeX, int homeY) = ComputeHomePosition(root);
+                SetPosition(copiedNodes[0], homeX, homeY);
 
                 if (snippet.Kind == VizzyNodeKind.Instruction)
                 {
@@ -132,7 +141,12 @@ namespace Assets.Scripts.CopyPaste.Export
                         expressions.Add(node);
                 }
 
-                variablesCreated = AddMissingVariables(root, snippet.ReferencedGlobalVariableDefinitions);
+                counts = new ExportCounts
+                {
+                    VariablesCreated = AddMissingVariables(root, snippet.ReferencedGlobalVariableDefinitions),
+                    CustomExpressionsCreated = AddMissingCustomExpressions(root, snippet.ReferencedCustomExpressionDefinitions),
+                    CustomInstructionsCreated = AddMissingCustomInstructions(root, snippet.ReferencedCustomInstructionBlocks),
+                };
 
                 doc.Save(targetFilePath);
                 return true;
@@ -146,41 +160,42 @@ namespace Assets.Scripts.CopyPaste.Export
         }
 
         /// <summary>
-        /// Approximates "the middle of the Vizzy screen" for the target file by averaging
-        /// the position of its existing top-level blocks - we have no way to read the
-        /// actual camera/scroll state of a program that isn't currently open in the editor,
-        /// but a file's existing content is generally where the user's view already sits,
-        /// so its centroid is a reasonable stand-in. Falls back to the origin for an
-        /// empty/new-ish file. A small random jitter is added so exporting more than once
-        /// into the same file doesn't stack every export exactly on top of the last one.
+        /// Approximates "where you land when you open this program" - there's no way to read
+        /// a program's actual camera/scroll state from outside the running editor (the
+        /// &lt;Program&gt; root stores nothing like it, confirmed by inspecting real files -
+        /// just "name" and occasionally "requiresMfd"), so this anchors on the FlightStart
+        /// ("on start") event's position instead, falling back to the plain origin if none is
+        /// found.
+        ///
+        /// This replaced an earlier version that averaged the position of *every* positioned
+        /// top-level block. That broke down on real, heavily-used programs: inspecting one
+        /// (2900+ lines) turned up only 3 blocks anywhere with a "pos" attribute at all out of
+        /// several dozen top-level blocks - everything else had apparently never been dragged
+        /// since creation and simply had none. Averaging such a small, arbitrary sample skews
+        /// toward wherever *those specific* blocks happen to sit, not toward where the user
+        /// actually views/works - which is exactly what was reported ("I can't find it").
+        /// FlightStart is present in essentially every program and, by strong convention
+        /// (confirmed by the same file inspection), sits close to the origin - closer to a
+        /// real "home" anchor than an unweighted average ever was.
+        ///
+        /// A small random jitter is added so exporting more than once into the same file
+        /// doesn't stack every export exactly on top of the last one.
         /// </summary>
-        private static (int x, int y) ComputeCenterPosition(XElement root)
+        private static (int x, int y) ComputeHomePosition(XElement root)
         {
-            List<(int x, int y)> positions = new List<(int x, int y)>();
-
-            foreach (XElement block in root.Elements("Instructions"))
-            {
-                XElement head = block.Elements().FirstOrDefault();
-                if (TryGetPosition(head, out int x, out int y))
-                    positions.Add((x, y));
-            }
-
-            XElement expressionsContainer = root.Element("Expressions");
-            if (expressionsContainer != null)
-            {
-                foreach (XElement expr in expressionsContainer.Elements())
-                {
-                    if (TryGetPosition(expr, out int x, out int y))
-                        positions.Add((x, y));
-                }
-            }
-
             int baseX = 0;
             int baseY = 0;
-            if (positions.Count > 0)
+
+            XElement flightStartHead = root.Elements("Instructions")
+                .Select(block => block.Elements().FirstOrDefault())
+                .FirstOrDefault(head => head != null
+                    && head.Name.LocalName == "Event"
+                    && (string)head.Attribute("event") == "FlightStart");
+
+            if (flightStartHead != null && TryGetPosition(flightStartHead, out int fsX, out int fsY))
             {
-                baseX = (int)positions.Average(p => p.x);
-                baseY = (int)positions.Average(p => p.y);
+                baseX = fsX;
+                baseY = fsY;
             }
 
             const int jitterRange = 50;
@@ -258,6 +273,90 @@ namespace Assets.Scripts.CopyPaste.Export
                     continue;
 
                 variables.Add(new XElement(definition));
+                existingNames.Add(name);
+                added++;
+            }
+
+            return added;
+        }
+
+        /// <summary>
+        /// Adds a copy of each given CustomExpression definition (with its body) to the
+        /// target's shared Expressions container, skipping any name the target already
+        /// defines - same never-overwrite policy as variables, for the same reason (a
+        /// same-named custom expression already there might be deliberately different, and
+        /// other blocks in the target could already depend on it).
+        /// </summary>
+        private static int AddMissingCustomExpressions(XElement root, List<XElement> definitions)
+        {
+            if (definitions == null || definitions.Count == 0)
+                return 0;
+
+            XElement expressions = root.Element("Expressions");
+            if (expressions == null)
+            {
+                expressions = new XElement("Expressions");
+                root.Add(expressions);
+            }
+
+            HashSet<string> existingNames = new HashSet<string>(
+                expressions.Elements("CustomExpression").Select(e => (string)e.Attribute("name")).Where(n => n != null),
+                StringComparer.Ordinal);
+
+            int added = 0;
+            foreach (XElement definition in definitions)
+            {
+                string name = (string)definition.Attribute("name");
+                if (string.IsNullOrEmpty(name) || existingNames.Contains(name))
+                    continue;
+
+                XElement copy = new XElement(definition);
+                StripIds(copy);
+                expressions.Add(copy);
+                existingNames.Add(name);
+                added++;
+            }
+
+            return added;
+        }
+
+        /// <summary>
+        /// Adds a copy of each given CustomInstruction's whole containing Instructions block
+        /// (head element + body chain) as a new top-level block, skipping any name the target
+        /// already defines - same never-overwrite policy as variables/custom expressions.
+        /// Positions are left as copied from the source rather than centered like the main
+        /// export: these are supporting definitions, not the thing the user is looking for,
+        /// and custom blocks are typically kept clustered together off in their own area of
+        /// the canvas, which the source's own coordinates already reflect.
+        /// </summary>
+        private static int AddMissingCustomInstructions(XElement root, List<XElement> instructionBlocks)
+        {
+            if (instructionBlocks == null || instructionBlocks.Count == 0)
+                return 0;
+
+            HashSet<string> existingNames = new HashSet<string>(StringComparer.Ordinal);
+            foreach (XElement block in root.Elements("Instructions"))
+            {
+                XElement head = block.Elements().FirstOrDefault();
+                if (head != null && head.Name.LocalName == "CustomInstruction")
+                {
+                    string existingName = (string)head.Attribute("name");
+                    if (existingName != null)
+                        existingNames.Add(existingName);
+                }
+            }
+
+            int added = 0;
+            foreach (XElement block in instructionBlocks)
+            {
+                XElement head = block.Elements().FirstOrDefault();
+                string name = head != null && head.Name.LocalName == "CustomInstruction" ? (string)head.Attribute("name") : null;
+                if (string.IsNullOrEmpty(name) || existingNames.Contains(name))
+                    continue;
+
+                XElement copy = new XElement(block);
+                StripIds(copy);
+                root.Add(copy);
                 existingNames.Add(name);
                 added++;
             }

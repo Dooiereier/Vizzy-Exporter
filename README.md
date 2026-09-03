@@ -12,9 +12,11 @@ arguments, etc.) - gets written into that file as a new, independent block
 group, placed near the middle of that program's existing content. Next time
 you open that program, it's there, positioned somewhere you'll actually see
 it rather than off in a stale coordinate. If the exported blocks reference
-global variables the target program doesn't have yet, those get created
-there too (copied from their real definition in the source program, not
-guessed).
+global variables, custom expressions, or custom instructions the target
+program doesn't have yet, those get created there too - copied from their
+real definitions in the source program (not guessed), transitively: a
+pulled-in custom block that itself calls further custom blocks or variables
+gets those pulled in as well.
 
 ## How it works
 
@@ -85,20 +87,32 @@ silently - nothing is written until it can confirm the target file is valid.
 
 ## Known limitations (v1)
 
-- **A variable with a colliding name is never touched.** If the target
-  already defines a global variable with the same name as one the export
-  needs, that existing variable is left exactly as-is (on purpose - it might
-  be a different type/value on purpose, and overwriting it could break other
-  blocks in the target that depend on it). If it turns out to be a different
-  type than the source expected, the pasted block may misbehave until you
-  sort that out by hand.
-- **Placement is a best guess, not the real camera position.** There's no
-  way to read a program's actual on-screen scroll/zoom state from outside
-  the running editor, so "center" is approximated as the average position of
-  the target file's existing top-level blocks (falling back to the origin
-  for an empty file), with a little random jitter so repeated exports into
-  the same file don't stack exactly on top of each other. Usually close; not
-  guaranteed to be exactly what's on screen when you open it.
+- **A colliding name is never touched**, for a global variable, custom
+  expression, or custom instruction alike. If the target already defines one
+  with the same name as one the export needs, that existing definition is
+  left exactly as-is (on purpose - it might be a deliberately different
+  type/value/implementation, and overwriting it could break other blocks in
+  the target that depend on it). If it turns out to be meaningfully
+  different from what the source expected, the pasted block may misbehave
+  until you sort that out by hand.
+- **Placement is a best guess, not the real camera position**, for the main
+  exported block. There's no way to read a program's actual on-screen
+  scroll/zoom state from outside the running editor - the saved file stores
+  nothing like it - so the export is placed near the target's `FlightStart`
+  ("on start") event instead, since that's present in essentially every
+  program and, by convention, tends to sit close to where the view lands
+  when you open one (falling back to the plain origin if a program somehow
+  has none), with a little random jitter so repeated exports into the same
+  file don't stack exactly on top of each other. An earlier version averaged
+  the position of every positioned top-level block instead; that broke down
+  on real, heavily-used programs where most blocks never had a `pos` at all
+  and the tiny handful that did skewed the average toward an arbitrary
+  corner of the canvas, nowhere near where the user was actually looking.
+  Any newly-created custom instruction definitions keep their original
+  position from the source program instead of being placed near
+  `FlightStart` - they're supporting code, not the thing you're looking for,
+  and custom blocks are typically clustered together off in their own area
+  of the canvas already.
 - **Target must be an existing file.** "Export to..." lists your saved
   programs; it doesn't create a new one. (Easy to add later if you want it -
   just needs a "New file..." entry in `ExportTargetPicker`.)
@@ -107,19 +121,23 @@ silently - nothing is written until it can confirm the target file is valid.
 
 ```
 Assets/
-  Vizzy Copy Paste.asmdef
+  Vizzy Exporter.asmdef
+  ModData.asset                             - Mod Tools manifest (name, assemblies, version)
   Scripts/
-    Mod.cs                              - entry point, sets up Harmony
-    Bridge/SerializerBridge.cs           - the private/best-effort API calls, isolated here
-    Export/VizzyExportSnippet.cs         - captures a block (+ chain) as XML
-    Export/VariableDependencyResolver.cs - finds referenced global variables + their real definitions
-    Export/VizzyProgramFileExporter.cs   - lists program files, writes the export, positions it, adds missing variables
-    Patches/ContextMenuPatcher.cs        - hooks right-click on blocks
-    UI/BlockContextMenu.cs               - the "Export to..." popup
-    UI/ExportTargetPicker.cs             - the file-list popup
-    UI/PopupWidgets.cs                   - shared button/dialog helpers
+    Mod.cs                                  - entry point, sets up Harmony
+    ModSettings.cs                          - the mod's (currently empty) settings page
+    DeployTools.cs                          - editor menu to copy the built .sr2-mod into Juno's mods folder
+    Bridge/SerializerBridge.cs              - the game's real (confirmed) serialization API calls
+    Export/VizzyExportSnippet.cs            - captures a block (+ whole chain, incl. nested bodies) as XML
+    Export/VariableDependencyResolver.cs    - finds referenced global variables + their real definitions
+    Export/CustomBlockDependencyResolver.cs - finds referenced custom expressions/instructions + their real definitions
+    Export/VizzyProgramFileExporter.cs      - lists program files, writes the export, positions it, adds missing dependencies
+    Patches/ContextMenuPatcher.cs           - hooks right-click on blocks
+    UI/BlockContextMenu.cs                  - the "Export to another Vizzy" popup
+    UI/ExportTargetPicker.cs                - the scrollable file-list popup
+    UI/PopupWidgets.cs                      - shared button/dialog helpers
 docs/
-  IMPLEMENTATION_NOTES.md                - what's confirmed vs. best-effort, and how to fix guesses
+  IMPLEMENTATION_NOTES.md                   - what's confirmed vs. best-effort, and how to fix guesses
 ```
 
 ## Licensing notes (what isn't in this repo)

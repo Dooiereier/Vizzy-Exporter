@@ -88,6 +88,48 @@ schema:
   fine without ids, this was unnecessary but harmless; if the game turns out
   to need every element to have one, this is the method to revisit.
 
+## Confirmed custom expression/instruction schema (from real saved program files)
+
+Not covered by kroryan/VizzyCode's converter - confirmed instead by reading
+actual saved `.xml` program files directly (via file-system access, once the
+mod was already producing real output to look at):
+
+- **A call site** looks like `<CallCustomExpression call="Name" ...>` (with
+  its argument expressions as children) or `<CallCustomInstruction
+  call="Name" ... />` - `call` matches the definition's `name` (see below),
+  the same "reference by name" pattern as a variable reference's
+  `variableName`.
+
+- **A `<CustomExpression>` definition** lives as a normal entry in the
+  program's single shared `<Expressions>` container, alongside any other
+  standalone expression - `<CustomExpression name="Name" ...>` with its own
+  expression tree nested directly inside it, since a custom expression
+  returns one value from one tree. Self-contained: `CustomBlockDependencyResolver.ResolveCustomExpressionDefinition`
+  just finds and copies the whole element.
+
+- **A `<CustomInstruction>` definition is *not* self-contained.** The
+  `<CustomInstruction name="Name" ... />` element is self-closing - its body
+  is *not* nested inside it. Instead, it's the **first child of its own
+  top-level `<Instructions>` block**, exactly like how `<Event
+  event="FlightStart">` is the head of an "on start" column - and every
+  sibling element after it in that same `<Instructions>` block, flat, is its
+  body (an ordinary instruction chain). So "the definition" for export
+  purposes is the *whole* `<Instructions>` block, not just the
+  `<CustomInstruction>` element - `CustomBlockDependencyResolver.ResolveCustomInstructionBlock`
+  returns that whole block, and `VizzyProgramFileExporter.AddMissingCustomInstructions`
+  copies it in as a new top-level sibling, the same way the main exported
+  chain becomes one.
+
+- **Dependencies are transitive and resolved together with variables.** A
+  pulled-in custom expression/instruction's own body can call further custom
+  blocks, or reference further global variables (e.g. a "Display" custom
+  instruction calling "Clock" and "KMH" custom expressions). `VizzyExportSnippet.CaptureDependencies`
+  runs a worklist over newly-pulled-in definitions until a pass finds nothing
+  new, rather than a single pass over just the originally captured nodes.
+  Same never-overwrite-on-name-collision policy as variables throughout
+  (`AddMissingVariables`/`AddMissingCustomExpressions`/`AddMissingCustomInstructions`
+  all skip any name the target already defines).
+
 ## Confirmed hooks into the running editor (from Vizzy Studio)
 
 - `BlockElementScript.Node -> ProgramNode` and `<block>.VizzyUI.FlightProgram`
@@ -96,8 +138,10 @@ schema:
 - `InstructionElementScript.NextInstruction -> InstructionElementScript`
   Confirmed via `InstructionElementScriptPatches.DisconnectBlock`, which
   reads and rewrites this same chain of pointers when a block is dragged out
-  of a chain. `VizzyExportSnippet.TryCapture` walks this same pointer to
-  collect the whole column below the right-clicked block.
+  of a chain. An earlier version of `VizzyExportSnippet.TryCapture` walked
+  this pointer itself to collect the whole column below the right-clicked
+  block; it no longer needs to (see `cloneChain` below) but the pointer's
+  existence and semantics are still what that whole design relies on.
 - `VariableElementScript.OnPointerClick(PointerEventData)`
   Confirmed to exist and be patchable (`VariableElementScriptPatches`
   patches it for its rename-on-click feature). `ContextMenuPatcher` patches
@@ -125,13 +169,28 @@ turned out to be wrong in different ways. Corrected in `SerializerBridge.cs`:
   method is `ModApi.Craft.Program.ProgramSerializer.SerializeProgramNodes`
   (plural) - **public static**, so no reflection is needed at all - with
   signature `(ProgramNode node, XElement parentElement, ref int
-  instructionId, bool cloneChain)`. It writes its result as a new child of
-  `parentElement` rather than returning it, and `instructionId` is a `ref`
-  counter for handing out unique ids across a run (safe to reset to 0 per
-  call here, since `VizzyProgramFileExporter.StripIds` strips every id
-  before writing into the target file anyway). `cloneChain` is passed
-  `false` since `VizzyExportSnippet` already walks the block chain itself
-  one node at a time.
+  instructionId, bool cloneChain)`. It writes its result as new child
+  element(s) of `parentElement` rather than returning one, and
+  `instructionId` is a `ref` counter for handing out unique ids across a run
+  (safe to reset to 0 per call, since `VizzyProgramFileExporter.StripIds`
+  strips every id before writing into the target file anyway).
+
+  **`cloneChain` governs *all* chain-walking, not just the top-level "next
+  block in the column" one.** First shipped as `false`, with
+  `VizzyExportSnippet` manually walking `NextInstruction` itself to capture
+  the column below the right-clicked block. That produced every nested
+  control-flow body empty - confirmed by inspecting real exported XML: every
+  `<While>`/`<If>` element had only its condition expression, no nested
+  `<Instructions>` body at all, at any depth, in any of several test exports.
+  A While/If/Repeat/For body is itself a chain (same `<Instructions>` tag,
+  nested one level down - see the schema note above), so it turns out
+  `cloneChain=false` suppresses walking *any* chain, nested or top-level, not
+  just the outer one. Fixed by passing `cloneChain=true` and letting the game
+  serialize the whole chain - top-level and every nested body - in one call
+  (`SerializerBridge.SerializeNodeChain`), instead of `VizzyExportSnippet`
+  walking `NextInstruction` node-by-node and only ever getting each node's
+  own direct arguments. `SerializeNode` (singular, `cloneChain=false`) is
+  kept for the lone-expression case, which has no chain to walk anyway.
 
 - **`ProgramSerializer.SerializeFlightProgram(FlightProgram)` isn't a
   static method on `ProgramSerializer`.** It's an **instance** method

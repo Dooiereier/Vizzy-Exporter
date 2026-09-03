@@ -59,7 +59,7 @@ namespace Assets.Scripts.CopyPaste.UI
             GameObject panelGo = new GameObject("Panel", typeof(RectTransform), typeof(Image), typeof(VerticalLayoutGroup));
             panelGo.transform.SetParent(transform, false);
             _panel = panelGo.GetComponent<RectTransform>();
-            _panel.sizeDelta = new Vector2(160, 0);
+            _panel.sizeDelta = new Vector2(210, 0);
             _panel.pivot = new Vector2(0f, 1f);
 
             panelGo.GetComponent<Image>().color = new Color(0.10f, 0.10f, 0.10f, 0.96f);
