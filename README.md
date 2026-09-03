@@ -1,36 +1,49 @@
 # Vizzy Copy Paste
 
-A mod for **Juno: New Origins** (formerly SimpleRockets 2) that adds right-click
-**Copy** and **Paste** to the Vizzy visual scripting editor.
+A mod for **Juno: New Origins** (formerly SimpleRockets 2) that adds a
+right-click **"Export to..."** action to the Vizzy visual scripting editor,
+for copying blocks between programs.
 
-Vizzy has no copy/paste today. This mod lets you right-click any block, copy it
-plus its whole chain of following blocks (and anything nested inside it - loop
-bodies, arguments, etc.), then right-click any block in *any* Vizzy program -
-a different part, a different craft, even after restarting the game - and
-paste it back in. The clipboard is just XML text sitting in your OS clipboard,
-so it survives all of that for free.
+Vizzy has no way to reuse blocks across programs today. This mod lets you
+right-click any block, choose **Export to...**, pick one of your existing
+saved Vizzy program files from a list, and the block - plus its whole column
+of blocks chained below it, and anything nested inside it (loop bodies,
+arguments, etc.) - gets written into that file as a new block group. Next
+time you open that program, it's there.
+
+## How it works
+
+Vizzy programs are saved as plain XML on disk (that's the same format
+`ProgramSerializer` reads and writes when you save/load a program in-game).
+This mod doesn't touch the game's live in-memory editor state at all for the
+"paste" side - it:
+
+1. Reads the right-clicked block's data and serializes it (and its chain)
+   into XML, using the game's own serializer.
+2. Lists the `.xml` files in your Vizzy programs folder.
+3. On your pick, opens that file, adds the exported block(s) as a new
+   top-level group, and saves it back to disk.
+
+Because this only edits a file, not a running program, it works regardless
+of which part/craft you have open, and there's no risky "rebuild blocks
+on screen" step involved.
 
 ## Status
 
-Copy is built on confirmed, working game APIs (see below) and should work as
-soon as this is compiled against your game version. Paste's automatic block
-placement uses a couple of educated guesses about private method names that
-**need to be checked against this game version's code** - see
-[`docs/IMPLEMENTATION_NOTES.md`](docs/IMPLEMENTATION_NOTES.md) for exactly
-which ones, and how to fix them with a decompiler if they're wrong. Nothing
-in the mod can crash the game or lose your clipboard contents if a guess is
-wrong - it just shows you a message and leaves the mod's other features
-working.
+The one non-public game API this mod reaches into
+(`ProgramSerializer.SerializeProgramNode`) is confirmed to exist by name and
+signature - see [`docs/IMPLEMENTATION_NOTES.md`](docs/IMPLEMENTATION_NOTES.md)
+for exactly how, and what to check if it ever needs adjusting for a game
+update. Everything else uses directly-confirmed, public members.
 
 ## How it was built
 
 This mod's structure and its use of the game's modding hooks (Harmony +
-`ModApi.Craft.Program`) are modeled directly on
+`ModApi.Craft.Program`) are modeled on
 [Vizzy Studio](https://github.com/joaofarias/VizzyStudio), an existing,
-published, working mod for this same game. Wherever this mod calls into a
-private/internal game method, that call is either the same one Vizzy Studio
-already uses (confirmed to exist), or clearly marked as a best-effort guess
-that mirrors Vizzy Studio's own patterns for finding such members.
+published, working mod for this same game. The one reflection-based call in
+this mod is the same private method Vizzy Studio's own patches already
+target.
 
 ## Requirements
 
@@ -40,9 +53,6 @@ that mirrors Vizzy Studio's own patterns for finding such members.
   you don't already have this set up).
 - [Harmony](https://github.com/pardeike/Harmony) (`0Harmony.dll`) - the same
   copy you're already using for the `jno-ipad-screen` mod works fine here.
-- A decompiler (dnSpy or ILSpy) pointed at your installed game's
-  `Assembly-CSharp.dll`, in case any of the best-effort guesses in
-  `NodeBuilderBridge.cs` need adjusting for your game version.
 
 ## Setup
 
@@ -58,16 +68,28 @@ that mirrors Vizzy Studio's own patterns for finding such members.
 ## Using it
 
 1. Right-click any block in the Vizzy editor.
-2. **Copy** - copies that block and everything below/inside it to your
-   clipboard.
-3. Open the program you want to paste into (any part, any craft).
-4. Right-click any existing block there and choose **Paste**. The pasted
-   chain appears under your cursor, ready to drop, just like the game's own
-   block-cloning drag.
+2. Choose **Export to...**.
+3. Pick one of your existing saved programs from the list.
+4. Open that program (any part, any craft) - your exported block(s) are
+   there as a new group.
 
-If Paste can't place the block automatically on your game version, it tells
-you so instead of failing silently - your copy is still safe on the
-clipboard, and `docs/IMPLEMENTATION_NOTES.md` explains the one file to fix.
+If export fails for some reason, it tells you why instead of failing
+silently - nothing is written until it can confirm the target file is valid.
+
+## Known limitations (v1)
+
+- **Global variables aren't copied.** If the exported block references a
+  global variable, you'll need a variable of the same name in the target
+  program too, or the pasted block will reference something that doesn't
+  exist. (Vizzy Studio's own "References" feature solves this more
+  generally - out of scope here for now.)
+- **Target must be an existing file.** "Export to..." lists your saved
+  programs; it doesn't create a new one. (Easy to add later if you want it -
+  just needs a "New file..." entry in `ExportTargetPicker`.)
+- **Position isn't reflowed.** The exported blocks keep whatever on-canvas
+  position they had in the source program, so they may land on top of
+  existing blocks in the target file - just drag them where you want once
+  you open it.
 
 ## Project layout
 
@@ -75,13 +97,16 @@ clipboard, and `docs/IMPLEMENTATION_NOTES.md` explains the one file to fix.
 Assets/
   Vizzy Copy Paste.asmdef
   Scripts/
-    Mod.cs                        - entry point, sets up Harmony
-    Clipboard/VizzyClipboard.cs    - serialize/deserialize + OS clipboard I/O
-    Bridge/NodeBuilderBridge.cs    - the handful of private-API calls, all in one place
-    Patches/ContextMenuPatcher.cs  - hooks right-click on blocks
-    UI/BlockContextMenu.cs         - the Copy/Paste popup menu
+    Mod.cs                              - entry point, sets up Harmony
+    Bridge/SerializerBridge.cs           - the one private-API call, isolated here
+    Export/VizzyExportSnippet.cs         - captures a block (+ chain) as XML
+    Export/VizzyProgramFileExporter.cs   - lists program files, writes the export
+    Patches/ContextMenuPatcher.cs        - hooks right-click on blocks
+    UI/BlockContextMenu.cs               - the "Export to..." popup
+    UI/ExportTargetPicker.cs             - the file-list popup
+    UI/PopupWidgets.cs                   - shared button/dialog helpers
 docs/
-  IMPLEMENTATION_NOTES.md          - what's confirmed vs. best-effort, and how to fix guesses
+  IMPLEMENTATION_NOTES.md                - what's confirmed vs. best-effort, and how to fix guesses
 ```
 
 ## Licensing notes (what isn't in this repo)

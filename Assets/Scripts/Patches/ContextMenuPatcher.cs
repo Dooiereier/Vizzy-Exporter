@@ -9,7 +9,7 @@ using UnityEngine.EventSystems;
 namespace Assets.Scripts.CopyPaste.Patches
 {
     /// <summary>
-    /// Hooks right-clicks on Vizzy blocks so we can pop the Copy/Paste menu.
+    /// Hooks right-clicks on Vizzy blocks so we can pop the "Export to..." menu.
     ///
     /// This patches manually at runtime instead of via [HarmonyPatch] attributes, because
     /// we're not 100% sure which class actually declares OnPointerClick for a plain
