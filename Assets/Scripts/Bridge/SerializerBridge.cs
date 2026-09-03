@@ -43,5 +43,39 @@ namespace Assets.Scripts.CopyPaste.Bridge
             object result = SerializeProgramNodeMethod.Invoke(null, new object[] { node, scratchParent });
             return (XElement)result;
         }
+
+        // Confirmed accessible (nameof(ProgramSerializer.SerializeFlightProgram) is used in
+        // Vizzy Studio's ProgramSerializerPatches), but that only proves *some* accessible
+        // overload named this exists - not its exact parameter type, since nameof doesn't
+        // check parameters. Reached via reflection anyway so a wrong guess here degrades
+        // gracefully (variable auto-creation just gets skipped) instead of failing to
+        // compile the whole mod.
+        private static readonly MethodInfo SerializeFlightProgramMethod =
+            AccessTools.Method(typeof(ProgramSerializer), "SerializeFlightProgram", new[] { typeof(FlightProgram) });
+
+        /// <summary>
+        /// Serializes the *entire current program* (all instructions, expressions, and -
+        /// what we actually want it for - the live, accurate list of global variable
+        /// definitions) exactly as the game would when saving. Returns null rather than
+        /// throwing if this isn't available, since callers use it for a nice-to-have
+        /// (auto-creating missing variables), not for the core export path.
+        /// </summary>
+        public static XElement TrySerializeFlightProgram(FlightProgram program)
+        {
+            if (SerializeFlightProgramMethod == null || program == null)
+                return null;
+
+            try
+            {
+                return (XElement)SerializeFlightProgramMethod.Invoke(null, new object[] { program });
+            }
+            catch (Exception ex)
+            {
+                UnityEngine.Debug.LogWarning(
+                    $"[Vizzy Copy Paste] Couldn't serialize the current program to look up variable definitions " +
+                    $"(missing global variables won't be auto-created in the target file this time): {ex.Message}");
+                return null;
+            }
+        }
     }
 }

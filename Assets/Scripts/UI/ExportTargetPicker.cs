@@ -141,10 +141,17 @@ namespace Assets.Scripts.CopyPaste.UI
             VizzyExportSnippet snippet = _snippet;
             Hide();
 
-            if (VizzyProgramFileExporter.TryExport(snippet, targetFilePath, out string error))
+            if (VizzyProgramFileExporter.TryExport(snippet, targetFilePath, out int variablesCreated, out string error))
             {
-                PopupWidgets.ShowMessage($"Exported to {Path.GetFileNameWithoutExtension(targetFilePath)}. " +
-                                          "It'll show up as a new block group next time that program is opened.");
+                string variableNote = "";
+                if (variablesCreated == 1)
+                    variableNote = " Created 1 missing global variable it needed.";
+                else if (variablesCreated > 1)
+                    variableNote = $" Created {variablesCreated} missing global variables it needed.";
+
+                PopupWidgets.ShowMessage($"Exported to {Path.GetFileNameWithoutExtension(targetFilePath)}." +
+                                          variableNote +
+                                          " It'll show up as a new block group next time that program is opened.");
             }
             else
             {
