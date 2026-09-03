@@ -72,7 +72,7 @@ namespace Assets.Scripts.CopyPaste.UI
             layout.padding = new RectOffset(6, 6, 6, 6);
             layout.spacing = 2;
             layout.childControlWidth = true;
-            layout.childControlHeight = false;
+            layout.childControlHeight = true;
             layout.childForceExpandHeight = false;
             layout.childForceExpandWidth = true;
             panelGo.GetComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
@@ -93,7 +93,7 @@ namespace Assets.Scripts.CopyPaste.UI
             VerticalLayoutGroup listLayout = listGo.GetComponent<VerticalLayoutGroup>();
             listLayout.spacing = 1;
             listLayout.childControlWidth = true;
-            listLayout.childControlHeight = false;
+            listLayout.childControlHeight = true;
             listLayout.childForceExpandHeight = false;
             listLayout.childForceExpandWidth = true;
             _listParent = listGo.transform;

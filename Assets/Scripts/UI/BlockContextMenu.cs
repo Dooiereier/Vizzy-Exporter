@@ -68,13 +68,13 @@ namespace Assets.Scripts.CopyPaste.UI
             layout.padding = new RectOffset(4, 4, 4, 4);
             layout.spacing = 2;
             layout.childControlWidth = true;
-            layout.childControlHeight = false;
+            layout.childControlHeight = true;
             layout.childForceExpandHeight = false;
             layout.childForceExpandWidth = true;
             ContentSizeFitter fitter = panelGo.AddComponent<ContentSizeFitter>();
             fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
-            _exportButton = PopupWidgets.CreateButton(panelGo.transform, "Export to...", out _);
+            _exportButton = PopupWidgets.CreateButton(panelGo.transform, "Export to another Vizzy", out _);
             _exportButton.onClick.AddListener(OnExportClicked);
 
             // Click-away-to-close: an invisible full-screen button behind the panel.

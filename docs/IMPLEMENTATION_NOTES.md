@@ -112,35 +112,46 @@ schema:
   Studio's `Mod.cs`, which reads this exact static path to back up program
   files on first run.
 
-## Best-effort / inferred
+## Serialization API - corrected against the real game assembly
 
-### 1. `ProgramSerializer.SerializeProgramNode(ProgramNode, XElement)` - low risk
+Vizzy Studio's source (what items 1-2 below were originally inferred from)
+was written against an older game version. Once this mod actually got built
+against the current `SimpleRockets2.dll`/`ModApi.dll` (via reflection dumps
+run from an editor menu item, see git history around this note for the
+throwaway `SerializerDiagnostics.cs` used to find these), both guesses
+turned out to be wrong in different ways. Corrected in `SerializerBridge.cs`:
 
-Vizzy Studio's `ProgramSerializerPatches` patches this with a **string**
-(`[HarmonyPatch("SerializeProgramNode")]`), not `nameof(...)`, which is a
-strong signal it's private or internal - that's why `SerializerBridge`
-reaches it through `AccessTools.Method(...)` instead of calling it directly.
-Low-risk: name and both parameter types are directly confirmed from that
-patch's postfix signature. **If it breaks:** check `ProgramSerializer` in
-dnSpy/ILSpy and update the `AccessTools.Method(...)` call at the top of
-`Assets/Scripts/Bridge/SerializerBridge.cs`.
+- **`SerializeProgramNode(ProgramNode, XElement)` doesn't exist.** The real
+  method is `ModApi.Craft.Program.ProgramSerializer.SerializeProgramNodes`
+  (plural) - **public static**, so no reflection is needed at all - with
+  signature `(ProgramNode node, XElement parentElement, ref int
+  instructionId, bool cloneChain)`. It writes its result as a new child of
+  `parentElement` rather than returning it, and `instructionId` is a `ref`
+  counter for handing out unique ids across a run (safe to reset to 0 per
+  call here, since `VizzyProgramFileExporter.StripIds` strips every id
+  before writing into the target file anyway). `cloneChain` is passed
+  `false` since `VizzyExportSnippet` already walks the block chain itself
+  one node at a time.
 
-### 2. `ProgramSerializer.SerializeFlightProgram(FlightProgram)` - low-medium risk
+- **`ProgramSerializer.SerializeFlightProgram(FlightProgram)` isn't a
+  static method on `ProgramSerializer`.** It's an **instance** method
+  declared on the interface `ModApi.Craft.Program.IProgramSerializer`,
+  which `ProgramSerializer` implements. There's no singleton/service-locator
+  accessor for it anywhere in the game's API, and `ProgramSerializer`'s only
+  constructor is `private ProgramSerializer()` - so `SerializerBridge`
+  constructs a throwaway instance via
+  `Activator.CreateInstance(typeof(ProgramSerializer), nonPublic: true)`
+  and calls the interface method on it directly. It's stateless, so a new
+  instance per call is fine.
 
-Used to grab the *entire* current program's XML (so `VariableDependencyResolver`
-can find real variable definitions to copy). `nameof(ProgramSerializer.SerializeFlightProgram)`
-appears in Vizzy Studio's patches, confirming *some* accessible member of
-that name exists, but nameof doesn't check parameter types, so the exact
-overload (`FlightProgram -> XElement`) is inferred from the obvious mirror
-with the confirmed `DeserializeFlightProgram(XElement) -> FlightProgram`.
-Reached via reflection specifically so a wrong guess here degrades
-gracefully - `SerializerBridge.TrySerializeFlightProgram` returns null on
-any failure, and `VizzyExportSnippet` just skips variable auto-creation for
-that export rather than failing the whole thing. **If missing variables
-stop being auto-created:** check the real signature in dnSpy and update
-`SerializerBridge.SerializeFlightProgramMethod`.
+**If either of these breaks again after a game update:** the fastest way to
+re-diagnose is the same one that found these - a temporary `[MenuItem]` in
+the Unity Editor that reflects over `System.AppDomain.CurrentDomain.GetAssemblies()`
+looking for methods by parameter/return shape rather than by name (renamed
+methods won't show up in a name search, but their signature usually doesn't
+change as much).
 
-### 3. Which class's `OnPointerClick` fires for a right-click - low risk, self-correcting
+### Which class's `OnPointerClick` fires for a right-click - low risk, self-correcting
 
 Only `VariableElementScript.OnPointerClick` is directly confirmed.
 `ContextMenuPatcher.TryPatchOnPointerClick` also tries `InstructionElementScript`

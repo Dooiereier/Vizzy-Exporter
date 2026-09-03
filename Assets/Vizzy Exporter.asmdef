@@ -1,5 +1,5 @@
 {
-    "name": "Vizzy Copy Paste",
+    "name": "Vizzy Exporter",
     "references": [
         "UnityEngine.UI",
         "Unity.TextMeshPro",

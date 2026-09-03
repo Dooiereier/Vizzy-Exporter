@@ -38,11 +38,10 @@ on screen" step involved.
 
 ## Status
 
-The one non-public game API this mod reaches into
-(`ProgramSerializer.SerializeProgramNode`) is confirmed to exist by name and
-signature - see [`docs/IMPLEMENTATION_NOTES.md`](docs/IMPLEMENTATION_NOTES.md)
-for exactly how, and what to check if it ever needs adjusting for a game
-update. Everything else uses directly-confirmed, public members.
+Built, deployed, and working in-game against the current version of Juno:
+New Origins. Every game API this mod uses is a confirmed, public member -
+see [`docs/IMPLEMENTATION_NOTES.md`](docs/IMPLEMENTATION_NOTES.md) for the
+exact methods and what to check if a future game update ever renames one.
 
 ## How it was built
 

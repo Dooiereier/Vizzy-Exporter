@@ -10,8 +10,11 @@
 
 # Unity generated project files
 .vs/
+.vscode/
 .gradle/
 ExportedObj/
+ModAssetBundles/
+Assets/ModTools/
 *.csproj
 *.unityproj
 *.sln
