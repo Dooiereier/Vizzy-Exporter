@@ -77,7 +77,7 @@ namespace Assets.Scripts.CopyPaste
                 if (_startedThisSession) return;
                 _startedThisSession = true;
 
-                _localVersion = null; // TODO: temporarily stubbed, see ModVersionDiagnostics
+                _localVersion = Mod.Instance.ModInfo.Version;
                 if (_localVersion == null)
                 {
                     Debug.Log("[Vizzy Copy Paste] Update check skipped - ModVersion is null.");
