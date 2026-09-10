@@ -1,4 +1,4 @@
-# Vizzy Copy Paste
+# Vizzy Exporter
 
 A mod for **Juno: New Origins** (formerly SimpleRockets 2) that adds a
 right-click **"Export to..."** action to the Vizzy visual scripting editor,
