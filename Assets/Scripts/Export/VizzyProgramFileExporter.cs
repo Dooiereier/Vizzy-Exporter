@@ -69,7 +69,6 @@ namespace Assets.Scripts.CopyPaste.Export
         // lived there instead of creating an independent new one. Instruction exports now
         // always get their own brand new <Instructions> sibling.
         private const string PosAttributeName = "pos";
-        private static readonly System.Random JitterRandom = new System.Random();
 
         /// <summary>
         /// Writes a captured snippet into the target file as a new top-level block
@@ -116,8 +115,9 @@ namespace Assets.Scripts.CopyPaste.Export
                     StripIds(node); // avoid colliding with node ids already used in the target file
                 }
 
-                (int homeX, int homeY) = ComputeHomePosition(root);
-                SetPosition(copiedNodes[0], homeX, homeY);
+                (int anchorX, int anchorY) = ComputeHomeAnchor(root);
+                (int mainX, int mainY) = NextStaircasePosition(root, anchorX, anchorY);
+                SetPosition(copiedNodes[0], mainX, mainY);
 
                 if (snippet.Kind == VizzyNodeKind.Instruction)
                 {
@@ -144,8 +144,8 @@ namespace Assets.Scripts.CopyPaste.Export
                 counts = new ExportCounts
                 {
                     VariablesCreated = AddMissingVariables(root, snippet.ReferencedGlobalVariableDefinitions),
-                    CustomExpressionsCreated = AddMissingCustomExpressions(root, snippet.ReferencedCustomExpressionDefinitions),
-                    CustomInstructionsCreated = AddMissingCustomInstructions(root, snippet.ReferencedCustomInstructionBlocks),
+                    CustomExpressionsCreated = AddMissingCustomExpressions(root, snippet.ReferencedCustomExpressionDefinitions, anchorX, anchorY),
+                    CustomInstructionsCreated = AddMissingCustomInstructions(root, snippet.ReferencedCustomInstructionBlocks, anchorX, anchorY),
                 };
 
                 doc.Save(targetFilePath);
@@ -178,14 +178,12 @@ namespace Assets.Scripts.CopyPaste.Export
         /// (confirmed by the same file inspection), sits close to the origin - closer to a
         /// real "home" anchor than an unweighted average ever was.
         ///
-        /// A small random jitter is added so exporting more than once into the same file
-        /// doesn't stack every export exactly on top of the last one.
+        /// Every newly-added top-level element in this export (the main block, and each
+        /// custom expression/instruction pulled in with it) gets its own step away from this
+        /// anchor via NextStaircasePosition, so nothing lands on top of anything else.
         /// </summary>
-        private static (int x, int y) ComputeHomePosition(XElement root)
+        private static (int x, int y) ComputeHomeAnchor(XElement root)
         {
-            int baseX = 0;
-            int baseY = 0;
-
             XElement flightStartHead = root.Elements("Instructions")
                 .Select(block => block.Elements().FirstOrDefault())
                 .FirstOrDefault(head => head != null
@@ -193,16 +191,39 @@ namespace Assets.Scripts.CopyPaste.Export
                     && (string)head.Attribute("event") == "FlightStart");
 
             if (flightStartHead != null && TryGetPosition(flightStartHead, out int fsX, out int fsY))
+                return (fsX, fsY);
+
+            return (0, 0);
+        }
+
+        private const string ExportOffsetAttributeName = "vizzyExporterOffset";
+        private const int StepX = 150;
+
+        // Vizzy's canvas Y axis increases upward (confirmed empirically - a positive Y step
+        // rendered *above* the previous export, not below), so "down" means a negative step.
+        private const int StepY = -100;
+
+        /// <summary>
+        /// Each new top-level element written into a given file - across every export, and
+        /// every custom expression/instruction pulled in with each one - lands one step
+        /// right-and-down from the last, instead of stacking on top of it. The running offset
+        /// is stored on the &lt;Program&gt; root as a bookkeeping-only attribute so it
+        /// persists across exports (and across game sessions); it means nothing to the game
+        /// itself.
+        /// </summary>
+        private static (int x, int y) NextStaircasePosition(XElement root, int anchorX, int anchorY)
+        {
+            int x = 0, y = 0;
+            string existing = (string)root.Attribute(ExportOffsetAttributeName);
+            if (!string.IsNullOrEmpty(existing))
             {
-                baseX = fsX;
-                baseY = fsY;
+                string[] parts = existing.Split(',');
+                if (parts.Length != 2 || !int.TryParse(parts[0], out x) || !int.TryParse(parts[1], out y))
+                    x = y = 0;
             }
 
-            const int jitterRange = 50;
-            baseX += JitterRandom.Next(-jitterRange, jitterRange + 1);
-            baseY += JitterRandom.Next(-jitterRange, jitterRange + 1);
-
-            return (baseX, baseY);
+            root.SetAttributeValue(ExportOffsetAttributeName, $"{x + StepX},{y + StepY}");
+            return (anchorX + x, anchorY + y);
         }
 
         private static bool TryGetPosition(XElement element, out int x, out int y)
@@ -285,9 +306,12 @@ namespace Assets.Scripts.CopyPaste.Export
         /// target's shared Expressions container, skipping any name the target already
         /// defines - same never-overwrite policy as variables, for the same reason (a
         /// same-named custom expression already there might be deliberately different, and
-        /// other blocks in the target could already depend on it).
+        /// other blocks in the target could already depend on it). Each added definition
+        /// gets its own staircased position - many source programs never bother positioning
+        /// custom expressions at all, which without this would land every copy on top of
+        /// each other in the target.
         /// </summary>
-        private static int AddMissingCustomExpressions(XElement root, List<XElement> definitions)
+        private static int AddMissingCustomExpressions(XElement root, List<XElement> definitions, int anchorX, int anchorY)
         {
             if (definitions == null || definitions.Count == 0)
                 return 0;
@@ -312,6 +336,8 @@ namespace Assets.Scripts.CopyPaste.Export
 
                 XElement copy = new XElement(definition);
                 StripIds(copy);
+                (int x, int y) = NextStaircasePosition(root, anchorX, anchorY);
+                SetPosition(copy, x, y);
                 expressions.Add(copy);
                 existingNames.Add(name);
                 added++;
@@ -324,12 +350,10 @@ namespace Assets.Scripts.CopyPaste.Export
         /// Adds a copy of each given CustomInstruction's whole containing Instructions block
         /// (head element + body chain) as a new top-level block, skipping any name the target
         /// already defines - same never-overwrite policy as variables/custom expressions.
-        /// Positions are left as copied from the source rather than centered like the main
-        /// export: these are supporting definitions, not the thing the user is looking for,
-        /// and custom blocks are typically kept clustered together off in their own area of
-        /// the canvas, which the source's own coordinates already reflect.
+        /// Each added block gets its own staircased position for the same reason as custom
+        /// expressions above.
         /// </summary>
-        private static int AddMissingCustomInstructions(XElement root, List<XElement> instructionBlocks)
+        private static int AddMissingCustomInstructions(XElement root, List<XElement> instructionBlocks, int anchorX, int anchorY)
         {
             if (instructionBlocks == null || instructionBlocks.Count == 0)
                 return 0;
@@ -356,6 +380,12 @@ namespace Assets.Scripts.CopyPaste.Export
 
                 XElement copy = new XElement(block);
                 StripIds(copy);
+                XElement copyHead = copy.Elements().FirstOrDefault();
+                if (copyHead != null)
+                {
+                    (int x, int y) = NextStaircasePosition(root, anchorX, anchorY);
+                    SetPosition(copyHead, x, y);
+                }
                 root.Add(copy);
                 existingNames.Add(name);
                 added++;

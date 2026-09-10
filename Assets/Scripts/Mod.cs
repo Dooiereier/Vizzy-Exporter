@@ -27,6 +27,8 @@ namespace Assets.Scripts.CopyPaste
 
             ContextMenuPatcher.Apply(harmony);
             BlockContextMenu.EnsureCreated();
+
+            new ModUpdater().CheckForUpdate();
         }
     }
 }

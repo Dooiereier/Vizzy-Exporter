@@ -15,7 +15,6 @@ namespace Assets.Scripts.CopyPaste.UI
     /// </summary>
     public class ExportTargetPicker : MonoBehaviour
     {
-        private const int MaxListedFiles = 40;
         private const float MaxListHeight = 320f;
 
         private static ExportTargetPicker _instance;
@@ -153,16 +152,8 @@ namespace Assets.Scripts.CopyPaste.UI
             }
             else
             {
-                int shown = 0;
                 foreach (string filePath in files)
                 {
-                    if (shown++ >= MaxListedFiles)
-                    {
-                        PopupWidgets.CreateButton(_listParent, $"... and {files.Count - MaxListedFiles} more", out Text moreLabel).interactable = false;
-                        moreLabel.color = new Color(1, 1, 1, 0.4f);
-                        break;
-                    }
-
                     string capturedPath = filePath;
                     string displayName = Path.GetFileNameWithoutExtension(filePath);
                     Button fileButton = PopupWidgets.CreateButton(_listParent, displayName, out _);
